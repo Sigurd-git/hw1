@@ -5,7 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-
     "polars",
     "torch",
     "torchvision",
@@ -14,4 +13,6 @@ dependencies = [
     "numpy",
     "scipy",
     "scikit-learn",
+    "tqdm",
+    "lightning",
 ]
