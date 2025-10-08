@@ -196,14 +196,21 @@ def train_model(
                 global_step += 1
                 if fabric.is_global_zero: # Used to operate only on the main process (if distributed training is used)
                     pbar.update(1)
-                if fabric.is_global_zero: # Used to operate only on the main process (if distributed training is used) 
+                if fabric.is_global_zero: # Used to operate only on the main process (if distributed training is used)
                     # save necessary metrics in a dictionary; it's recommended to also log seen_examples, which helps you creat appropriate figures in Part 3
                     current_lr = optimizer.param_groups[0]["lr"]
+                    parameter_norms = [
+                        parameter.grad.detach().norm(2)
+                        for parameter in model.parameters()
+                        if parameter.grad is not None
+                    ]
+                    average_gradient_norm = torch.stack(parameter_norms).mean().item() if parameter_norms else 0.0
                     batch_metrics = {
                         "train/batch_loss": float(loss.item()),
                         "train/lr": current_lr,
                         "train/epoch": epoch,
                         "train/seen_examples": seen_examples,
+                        "train/grad_norm": average_gradient_norm,
                     }
                     if wandb_run is not None:
                         wandb.log(batch_metrics, step=global_step)

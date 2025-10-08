@@ -159,9 +159,65 @@ Execute the experiment using the \textbf{default} setup (found in \texttt{get\_a
 
 \begin{answerbox} \textbf{Answer:} \vspace*{1cm}
 
+    Code snippet(s) completed to load the dataset:
+\begin{verbatim}
+    def build_split_dataset(dataset_root, selected_names, transform):
+        dataset = ImageFolder(root=dataset_root, transform=transform)
+        filtered_samples = [(path, target) for path, target in dataset.samples if Path(path).name in selected_names]
+        filtered_samples.sort(key=lambda entry: Path(entry[0]).name)
+        dataset.samples = filtered_samples
+        dataset.imgs = filtered_samples
+        dataset.targets = [target for _, target in filtered_samples]
+        return dataset
+    dataset_root = Path(__file__).resolve().parents[1] / "data"
+    metadata_path = Path(__file__).resolve().parent / "oxford_pet_split.csv"
+    metadata_frame = pl.read_csv(metadata_path)
+    train_names = set(metadata_frame.filter(pl.col("split") == "train").get_column("image_name").to_list())
+    val_names = set(metadata_frame.filter(pl.col("split") == "val").get_column("image_name").to_list())
+    test_names = set(metadata_frame.filter(pl.col("split") == "test").get_column("image_name").to_list())
+    normalization_mean = [0.485, 0.456, 0.406]
+    normalization_std = [0.229, 0.224, 0.225]
+
+    train_transforms = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=normalization_mean, std=normalization_std),
+    ])
+    eval_transforms = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=normalization_mean, std=normalization_std),
+    ])
+    train_set = build_split_dataset(dataset_root, train_names, train_transforms)
+    val_set = build_split_dataset(dataset_root, val_names, eval_transforms)
+    test_set = build_split_dataset(dataset_root, test_names, eval_transforms)
+\end{verbatim}
+
+Screenshot(s) of the experiment configuration:
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/experiment_configuration.png}
+    \caption{Experiment Configuration}
+\end{figure}
+
+Screenshot(s) of all logged charts:
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/logged_charts.png}
+    \caption{Logged Charts}
+\end{figure}
 
 
+Data logged accurately in the W\&B interface? Does the experiment configuration align with your expectations?
 
+Yes, the data is logged accurately in the W\&B interface. The experimental configuration aligns with my expectations, as both training and validation losses are decreasing and validation accuracy is increasing.
+
+Analyze the logged charts to determine whether the training has converged.
+
+The training has not converged yet since the losses are still decreasing and the validation accuracy is increasing.
 
 \end{answerbox}
 
@@ -180,6 +236,29 @@ In this section, you'll experiment with key hyperparameters like learning rate a
 \end{itemize}
 
 \begin{answerbox} \textbf{Answer:} \vspace*{1cm}
+
+Run Learning Rate vs Training Loss plot:
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/lr.png}
+    \caption{Learning Rate Impact}
+\end{figure}
+
+In theory, because the model has not yet converged, a relatively large learning rate might make the model perform better. However, as can be seen from the graph, when lr=0.001, there is the lowest val/test loss and the highest val/test accuracy. This indicates that an excessively large learning rate (0.01) may prevent the model from staying near a local optimum and instead jump out of the local optimum, leading to performance degradation. If you want to pursue extreme performance, you can try setting a finer grid between 0.01 and 0.0001. But I believe this is not the key to improving performance. Since the model has not yet converged, what we should do is increase the number of epochs. In addition, lr=0.001 or 0.0001 allows the model to converge the fastest. In conclusion, I believe that the default 0.001 is already a relatively reasonable choice.
+
+Code of your \href{https://docs.wandb.ai/guides/sweeps/define-sweep-configuration}{sweep configuration} that defines the search space:
+
+\begin{verbatim}
+    program: problem_1/train.py
+    method: grid 
+    metric:
+      name: val/loss
+      goal: minimize
+    parameters:
+      lr:
+        values: [1e-2, 1e-4, 1e-5]
+\end{verbatim}
 
 \end{answerbox}
 

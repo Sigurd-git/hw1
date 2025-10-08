@@ -1,0 +1,8 @@
+program: problem_1/train.py
+method: grid 
+metric:
+  name: val/loss
+  goal: minimize
+parameters:
+  lr:
+    values: [1e-3, 1e-1]

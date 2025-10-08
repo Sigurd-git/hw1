@@ -11,3 +11,13 @@ wheels/
 data/
 wandb/
 checkpoints/
+.texmf*/
+
+#latex
+**/*.log
+**/*.aux
+**/*.out
+**/*.pdf
+**/*.fls
+**/*.fdb_latexmk
+**/*.fdb_latexmk
