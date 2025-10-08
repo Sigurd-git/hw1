@@ -4,6 +4,6 @@ metric:
   name: val/loss
   goal: minimize
 parameters:
-  use_scheduler:
-    values: [True, False]
+  lr:
+    values: [1e-2, 1e-4, 1e-5]
 

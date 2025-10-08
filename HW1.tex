@@ -161,37 +161,59 @@ Execute the experiment using the \textbf{default} setup (found in \texttt{get\_a
 
     Code snippet(s) completed to load the dataset:
 \begin{verbatim}
-    def build_split_dataset(dataset_root, selected_names, transform):
-        dataset = ImageFolder(root=dataset_root, transform=transform)
-        filtered_samples = [(path, target) for path, target in dataset.samples if Path(path).name in selected_names]
-        filtered_samples.sort(key=lambda entry: Path(entry[0]).name)
-        dataset.samples = filtered_samples
-        dataset.imgs = filtered_samples
-        dataset.targets = [target for _, target in filtered_samples]
-        return dataset
-    dataset_root = Path(__file__).resolve().parents[1] / "data"
-    metadata_path = Path(__file__).resolve().parent / "oxford_pet_split.csv"
-    metadata_frame = pl.read_csv(metadata_path)
-    train_names = set(metadata_frame.filter(pl.col("split") == "train").get_column("image_name").to_list())
-    val_names = set(metadata_frame.filter(pl.col("split") == "val").get_column("image_name").to_list())
-    test_names = set(metadata_frame.filter(pl.col("split") == "test").get_column("image_name").to_list())
-    normalization_mean = [0.485, 0.456, 0.406]
-    normalization_std = [0.229, 0.224, 0.225]
+def build_split_dataset(dataset_root, selected_names, transform):
+    dataset = ImageFolder(root=dataset_root, transform=transform)
+    filtered_samples = [
+        (path, target)
+        for path, target in dataset.samples
+        if Path(path).name in selected_names
+    ]
+    filtered_samples.sort(key=lambda entry: Path(entry[0]).name)
+    dataset.samples = filtered_samples
+    dataset.imgs = filtered_samples
+    dataset.targets = [target for _, target in filtered_samples]
+    return dataset
+dataset_root = Path(__file__).resolve().parents[1] / "data"
+metadata_path = Path(__file__).resolve().parent / "oxford_pet_split.csv"
+metadata_frame = pl.read_csv(metadata_path)
+train_names = set(
+    metadata_frame.filter(pl.col("split") == "train")
+    .get_column("image_name")
+    .to_list()
+)
+val_names = set(
+    metadata_frame.filter(pl.col("split") == "val")
+    .get_column("image_name")
+    .to_list()
+)
+test_names = set(
+    metadata_frame.filter(pl.col("split") == "test")
+    .get_column("image_name")
+    .to_list()
+)
+normalization_mean = [0.485, 0.456, 0.406]
+normalization_std = [0.229, 0.224, 0.225]
 
-    train_transforms = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=normalization_mean, std=normalization_std),
-    ])
-    eval_transforms = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=normalization_mean, std=normalization_std),
-    ])
-    train_set = build_split_dataset(dataset_root, train_names, train_transforms)
-    val_set = build_split_dataset(dataset_root, val_names, eval_transforms)
-    test_set = build_split_dataset(dataset_root, test_names, eval_transforms)
+train_transforms = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=normalization_mean, std=normalization_std),
+])
+eval_transforms = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=normalization_mean, std=normalization_std),
+])
+
+train_set = build_split_dataset(
+    dataset_root, train_names, train_transforms)
+val_set = build_split_dataset(
+    dataset_root, val_names, eval_transforms)
+test_set = build_split_dataset(
+    dataset_root, test_names, eval_transforms)
 \end{verbatim}
 
 Screenshot(s) of the experiment configuration:
@@ -323,6 +345,18 @@ Learning rate schedulers dynamically adjust the learning rate during training, i
 
 \begin{answerbox} \textbf{Answer:} \vspace*{1cm}
 
+
+Screenshot(s) of W\&B charts:
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/scheduler.png}
+    \caption{Learning Rate Scheduler}
+\end{figure}
+
+\texttt{OneCycleLR} scheduler allows the learning rate to first rise and then fall, which helps the model remain stable in the early stages of training (preventing gradient explosion due to an excessively high learning rate) and converge quickly in the later stages (because reducing the learning rate after reaching near a local optimum makes it easier for the model to achieve a local optimum). The final results show that with a scheduler, the validation loss decreases faster, and the final loss is also smaller. The validation accuracy increases faster, and the final result is higher. On the test set, the accuracy with a scheduler is also higher, and the loss is lower. Overall, the effect of the scheduler is positive.
+
+
 \end{answerbox}
 
 
@@ -340,6 +374,25 @@ As observed in previous parts, the choice of learning rate is crucial for effect
 
 \begin{answerbox} \textbf{Answer:} \vspace*{1cm}
 
+
+Screenshot(s) of W\&B charts:
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/batch_size.png}
+    \caption{Batch Size}
+\end{figure}
+
+Their pattern does not match the blog post. According to the blog post, when the batch size increases, the learning rate should increase. Since we are using Adam, the learning rate should increase by the square root of 2 times. However, in reality, after increasing the learning rate by the square root of 2 times, I did not see better validation and test accuracy compared to the default learning rate. I think there could be multiple factors; firstly, the model has not yet converged, and perhaps after convergence, the effect might be different. Secondly, these rules are just a theoretical optimal solution and can easily vary with different datasets and models.
+
+To verify my first hypothesis, I added a scheduler for all three conditions. Based on previous attempts, I know that with a scheduler, the model converges better than without one, and in the later stages of training, the validation loss decreases very slowly, almost leveling off. However, in this case, the condition with the increased learning rate still does not outperform the condition with the default learning rate. Therefore, although it is unfortunate, this assignment does not match the pattern described in the blog.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/batch_size_scheduler.png}
+    \caption{Batch Size with Scheduler}
+\end{figure}
+
 \end{answerbox}
 
 \subsection*{Part 4: Fine-Tuning a Pretrained Model (3 points)}
@@ -354,6 +407,17 @@ Fine-tuning leverages the knowledge of models trained on large datasets by adapt
 \end{itemize}
 
 \begin{answerbox} \textbf{Answer:} \vspace*{1cm}
+
+
+Screenshot(s) of W\&B charts:
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/pretrained.png}
+    \caption{Pretrained Model}
+\end{figure}
+
+Pre-training allows the model to converge to a relatively better position at the beginning of training, making the subsequent training process more stable and resulting in higher final accuracy.
 
 \end{answerbox}
 

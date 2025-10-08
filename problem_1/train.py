@@ -66,7 +66,11 @@ def evaluate(model, data_loader, fabric):
 
 def build_split_dataset(dataset_root, selected_names, transform):
     dataset = ImageFolder(root=dataset_root, transform=transform)
-    filtered_samples = [(path, target) for path, target in dataset.samples if Path(path).name in selected_names]
+    filtered_samples = [
+        (path, target)
+        for path, target in dataset.samples
+        if Path(path).name in selected_names
+    ]
     filtered_samples.sort(key=lambda entry: Path(entry[0]).name)
     dataset.samples = filtered_samples
     dataset.imgs = filtered_samples
@@ -74,15 +78,16 @@ def build_split_dataset(dataset_root, selected_names, transform):
     return dataset
 
 def train_model(
-        run_name,
-        model,
-        batch_size,
-        epochs,
-        learning_rate,
-        device,
-        save_dir,
-        use_scheduler,
-        fabric,
+    run_name,
+    model,
+    batch_size,
+    epochs,
+    learning_rate,
+    device,
+    save_dir,
+    use_scheduler,
+    fabric,
+    pretrained,
 ):
     # TODO: Complete the code below to load the dataset; 
     # To do this you can make a custom Dataset class (torch.utils.data.Dataset) separately, which is passed here. 
@@ -94,9 +99,21 @@ def train_model(
     dataset_root = Path(__file__).resolve().parents[1] / "data"
     metadata_path = Path(__file__).resolve().parent / "oxford_pet_split.csv"
     metadata_frame = pl.read_csv(metadata_path)
-    train_names = set(metadata_frame.filter(pl.col("split") == "train").get_column("image_name").to_list())
-    val_names = set(metadata_frame.filter(pl.col("split") == "val").get_column("image_name").to_list())
-    test_names = set(metadata_frame.filter(pl.col("split") == "test").get_column("image_name").to_list())
+    train_names = set(
+        metadata_frame.filter(pl.col("split") == "train")
+        .get_column("image_name")
+        .to_list()
+    )
+    val_names = set(
+        metadata_frame.filter(pl.col("split") == "val")
+        .get_column("image_name")
+        .to_list()
+    )
+    test_names = set(
+        metadata_frame.filter(pl.col("split") == "test")
+        .get_column("image_name")
+        .to_list()
+    )
     normalization_mean = [0.485, 0.456, 0.406]
     normalization_std = [0.229, 0.224, 0.225]
 
@@ -111,8 +128,6 @@ def train_model(
         transforms.ToTensor(),
         transforms.Normalize(mean=normalization_mean, std=normalization_std),
     ])
-
-
 
     train_set = build_split_dataset(dataset_root, train_names, train_transforms)
     val_set = build_split_dataset(dataset_root, val_names, eval_transforms)
@@ -136,7 +151,7 @@ def train_model(
     if fabric.is_global_zero: # Used to operate only on the main process (if distributed training is used) # Used to only log on the main process (if distributed training is used)
         # Initialize a new wandb run and log experiment config parameters; don't forget the run name
         # you can also set run name to reflect key hyperparameters, such as learning rate, batch size, etc.: run_name = f'lr_{learning_rate}_bs_{batch_size}...'
-        descriptive_run_name = f"{run_name}_lr{learning_rate}_bs{batch_size}_sched{int(use_scheduler)}"
+        descriptive_run_name = f"lr{learning_rate}_bs{batch_size}_sched{int(use_scheduler)}_pretrained{int(pretrained)}"
         wandb_run = wandb.init(
             project=os.getenv("WANDB_PROJECT", "oxford_pet"),
             name=descriptive_run_name,
@@ -145,6 +160,7 @@ def train_model(
                 "learning_rate": learning_rate,
                 "batch_size": batch_size,
                 "use_scheduler": use_scheduler,
+                "pretrained": pretrained,
                 "optimizer": "Adam",
                 "model": "resnet18",
                 "n_train": n_train,
@@ -285,6 +301,9 @@ def get_args():
     parser.add_argument('--devices', type=int, default=1, help='Number of devices per node')
     parser.add_argument('--strategy', type=str, default='auto', help='Strategy: auto/ddp/fsdp, etc.')
     parser.add_argument('--precision', type=str, default='32-true', help='Precision: 32-true/16-mixed/bf16-mixed/64-true')
+    parser.add_argument(
+        "--pretrained", action="store_true", help="use pretrained model"
+    )
 
     # IMPORTANT: if you are copying this script to notebook, replace 'return parser.parse_args()' with 'args = parser.parse_args("")'
 
@@ -298,7 +317,12 @@ if __name__ == '__main__':
     # Initialize Fabric and launch distributed environment when applicable
     fabric = Fabric(accelerator=args.accelerator, devices=args.devices, strategy=args.strategy, precision=args.precision)
     fabric.launch()
-    model = resnet18(pretrained=False, num_classes=37)
+    if args.pretrained:
+        model = resnet18(pretrained=args.pretrained, num_classes=1000)
+        # replace the last layer
+        model.fc = nn.Linear(model.fc.in_features, 37)
+    else:
+        model = resnet18(pretrained=args.pretrained, num_classes=37)
     train_model(
         run_name=args.run_name,
         model=model,
@@ -309,4 +333,5 @@ if __name__ == '__main__':
         save_dir=args.save_dir,
         use_scheduler=args.use_scheduler,
         fabric=fabric,
+        pretrained=args.pretrained,
     )
