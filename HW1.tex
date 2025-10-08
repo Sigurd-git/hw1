@@ -275,6 +275,39 @@ Monitoring gradient norms during training is essential to detect exploding gradi
 
 \begin{answerbox} \textbf{Answer:} \vspace*{1cm}
 
+Screenshots of W\&B charts showing gradient norms and training loss over steps for both runs:
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/grad_norm.png}
+    \caption{Gradient Norm}
+\end{figure}
+
+Do you notice signs of exploding/vanishing gradients in the problematic run? If so, identify them and explain your inferences.
+
+Yes, I noticed the gradient explosion. From the graph, it can be seen that when lr=0.1, the gradient explosion is very severe, with the gradient norm rapidly rising to more than three times that at r=0.001, and then quickly dropping to 0. Meanwhile, the train loss rapidly increases and suddenly drops, then remains at a relatively low value. I noticed that the accuracy of val is almost a straight line and does not change, while the accuracy of the test is about 0.025. I did not calculate the accuracy of random guessing, but I suspect that the reason it remains stable might be because the excessively large learning rate disrupts the distribution of the model's parameters, causing the model to almost guess randomly.
+
+Code snippet(s) to compute and log gradient norms:
+
+\begin{verbatim}
+if fabric.is_global_zero: # Used to operate only on the main process (if distributed training is used)
+    current_lr = optimizer.param_groups[0]["lr"]
+    parameter_norms = [
+        parameter.grad.detach().norm(2)
+        for parameter in model.parameters()
+        if parameter.grad is not None
+    ]
+    average_gradient_norm = torch.stack(parameter_norms).mean().item() if parameter_norms else 0.0
+    batch_metrics = {
+        "train/batch_loss": float(loss.item()),
+        "train/lr": current_lr,
+        "train/epoch": epoch,
+        "train/seen_examples": seen_examples,
+        "train/grad_norm": average_gradient_norm,
+    }
+    if wandb_run is not None:
+        wandb.log(batch_metrics, step=global_step)
+\end{verbatim}
 
 \end{answerbox}
 
