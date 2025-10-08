@@ -1,0 +1,5 @@
+lightning
+torchvision
+scikit-learn
+pandas
+wandb
