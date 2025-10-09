@@ -231,9 +231,189 @@ lr_finder.reset()
 
 
 # %% functions used for post-train testing:
-# Dying ReLU Examination
 from utils.trained_models import get_trained_model
 trained_model = get_trained_model()
+trained_model.eval()
+analysis_device = torch.device("cpu")
+trained_model.to(analysis_device)
+
+from utils.datasets import get_testset as load_testset_for_relu
+
+dying_relu_dataset = load_testset_for_relu()
+dying_relu_loader = DataLoader(dying_relu_dataset, batch_size=128, shuffle=False)
+
+activation_positive_counts = {}
+activation_sample_totals = {}
+relu_hook_handles = []
+activation_ratio_samples = {}
+
+
+def register_relu_tracker(module, tracker_name, apply_relu):
+    activation_positive_counts[tracker_name] = None
+    activation_sample_totals[tracker_name] = 0
+
+    def hook(_module, _inputs, output):
+        tracked_output_cpu = output.detach().cpu()
+        if apply_relu:
+            tracked_output_cpu = torch.relu(tracked_output_cpu)
+        if tracked_output_cpu.ndim >= 3:
+            flattened_activation = tracked_output_cpu.reshape(
+                tracked_output_cpu.shape[0],
+                tracked_output_cpu.shape[1],
+                -1,
+            )
+        elif tracked_output_cpu.ndim == 2:
+            flattened_activation = tracked_output_cpu.unsqueeze(-1)
+        else:
+            flattened_activation = tracked_output_cpu.view(
+                tracked_output_cpu.shape[0],
+                -1,
+                1,
+            )
+        positive_mask = (flattened_activation > 0).any(dim=-1)
+        positive_counts = positive_mask.sum(dim=0).to(torch.int64)
+        if activation_positive_counts[tracker_name] is None:
+            activation_positive_counts[tracker_name] = positive_counts
+        else:
+            activation_positive_counts[tracker_name] += positive_counts
+        activation_sample_totals[tracker_name] += tracked_output_cpu.shape[0]
+
+    relu_hook_handles.append(module.register_forward_hook(hook))
+
+
+register_relu_tracker(trained_model.bn1, "stem_bn1_relu", True)
+residual_layers = [
+    ("layer1", trained_model.layer1),
+    ("layer2", trained_model.layer2),
+    ("layer3", trained_model.layer3),
+    ("layer4", trained_model.layer4),
+]
+
+for layer_name, layer_module in residual_layers:
+    for block_index, bottleneck_module in enumerate(layer_module):
+        block_prefix = f"{layer_name}_block{block_index}"
+        register_relu_tracker(bottleneck_module.bn1, f"{block_prefix}_bn1_relu", True)
+        register_relu_tracker(bottleneck_module.bn2, f"{block_prefix}_bn2_relu", True)
+        register_relu_tracker(bottleneck_module.bn3, f"{block_prefix}_bn3_relu", True)
+        register_relu_tracker(bottleneck_module, f"{block_prefix}_output_relu", False)
+
+register_relu_tracker(trained_model.fc1, "fc1_relu", True)
+
+logging.info(
+    "Initialized %d ReLU tracking hooks for dying ReLU analysis.",
+    len(relu_hook_handles),
+)
+logging.info(
+    "Running dying ReLU inspection across %d CIFAR-10 test samples.",
+    len(dying_relu_dataset),
+)
+
+with torch.no_grad():
+    for batch_images, _ in dying_relu_loader:
+        batch_images = batch_images.to(analysis_device)
+        trained_model(batch_images)
+
+for hook_handle in relu_hook_handles:
+    hook_handle.remove()
+
+logging.info("Completed forward passes for dying ReLU inspection.")
+
+dying_relu_records = []
+for tracker_name, positive_count_tensor in activation_positive_counts.items():
+    if positive_count_tensor is None:
+        logging.warning("No activations observed for %s; skipping.", tracker_name)
+        continue
+    total_channels = int(positive_count_tensor.numel())
+    dead_channel_count = int((positive_count_tensor == 0).sum().item())
+    sample_count = activation_sample_totals[tracker_name]
+    if sample_count == 0:
+        logging.warning("No samples accumulated for %s; skipping histogram.", tracker_name)
+        continue
+    dead_channel_ratio = dead_channel_count / total_channels
+    active_channel_ratio = 1.0 - dead_channel_ratio
+    death_message = (
+        "Detected %d dead ReLU channels in %s.",
+        dead_channel_count,
+        tracker_name,
+    )
+    if dead_channel_count > 0:
+        logging.warning(*death_message)
+    else:
+        logging.info(*death_message)
+    dying_relu_records.append(
+        {
+            "module": tracker_name,
+            "dead_channel_count": dead_channel_count,
+            "total_channels": total_channels,
+            "dead_channel_ratio": dead_channel_ratio,
+            "active_channel_ratio": active_channel_ratio,
+            "sample_count": sample_count,
+        }
+    )
+    channel_active_ratios = (positive_count_tensor.to(torch.float32) / sample_count).numpy()
+    activation_ratio_samples[tracker_name] = channel_active_ratios
+
+if dying_relu_records:
+    dying_relu_frame = pl.DataFrame(dying_relu_records).sort(
+        "dead_channel_ratio",
+        descending=True,
+    )
+    output_directory = Path("problem_2") / "outputs"
+    output_directory.mkdir(parents=True, exist_ok=True)
+    dying_relu_frame_path = output_directory / "dying_relu_summary.csv"
+    dying_relu_frame.write_csv(dying_relu_frame_path)
+    logging.info("Saved dying ReLU summary table to %s", dying_relu_frame_path)
+    histogram_directory = output_directory / "dying_relu_histograms"
+    histogram_directory.mkdir(parents=True, exist_ok=True)
+    colorblind_palette = sns.color_palette("colorblind")
+    for module_name, ratio_values in activation_ratio_samples.items():
+        ratio_frame = pl.DataFrame({"active_ratio": ratio_values})
+        histogram_figure, histogram_axis = plt.subplots(figsize=(8, 4))
+        sns.histplot(
+            data=ratio_frame.to_pandas(),
+            x="active_ratio",
+            bins=20,
+            ax=histogram_axis,
+            color=colorblind_palette[0],
+        )
+        histogram_axis.set_xlim(0, 1)
+        histogram_axis.set_xlabel("Channel Activation Ratio")
+        histogram_axis.set_ylabel("Channel Count")
+        histogram_axis.set_title(f"ReLU Activation Histogram: {module_name}")
+        histogram_figure.tight_layout()
+        histogram_path = histogram_directory / f"{module_name}_activation_hist.png"
+        histogram_figure.savefig(histogram_path, dpi=300)
+        plt.close(histogram_figure)
+        logging.info("Saved activation histogram for %s to %s", module_name, histogram_path)
+    dead_channels_frame = dying_relu_frame.filter(pl.col("dead_channel_count") > 0)
+    if dead_channels_frame.height > 0:
+        sorted_dead_channels = dead_channels_frame.sort(
+            "dead_channel_ratio",
+            descending=True,
+        )
+        sns.set_theme(style="whitegrid", palette="colorblind")
+        figure_height = max(4.0, 0.4 * sorted_dead_channels.height)
+        figure, axis = plt.subplots(figsize=(10, figure_height))
+        sns.barplot(
+            data=sorted_dead_channels.to_pandas(),
+            x="dead_channel_ratio",
+            y="module",
+            ax=axis,
+            palette="colorblind",
+        )
+        axis.set_xlabel("Dead Channel Ratio")
+        axis.set_ylabel("Module")
+        axis.set_title("Detected Dying ReLU Channels")
+        axis.set_xlim(0, 1)
+        figure.tight_layout()
+        dying_relu_plot_path = output_directory / "dying_relu_channels.png"
+        figure.savefig(dying_relu_plot_path, dpi=300)
+        plt.close(figure)
+        logging.info("Saved dying ReLU visualization to %s", dying_relu_plot_path)
+    else:
+        logging.info("No dead ReLU channels detected; skipping visualization.")
+else:
+    logging.warning("No dying ReLU records were generated.")
 
 # %% Model Robustness Test
 from utils.datasets import get_testset

@@ -21,3 +21,4 @@ checkpoints/
 **/*.fls
 **/*.fdb_latexmk
 **/*.fdb_latexmk
+**/outputs

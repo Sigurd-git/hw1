@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -79,5 +81,6 @@ class ResNet(nn.Module):
 
 def get_trained_model():
     model = ResNet(Bottleneck, [3, 4, 6, 3])
-    model.load_state_dict(torch.load('ckpt/trained_model.pt', map_location='cpu'))
+    checkpoint_path = Path(__file__).resolve().parent.parent / "ckpt" / "trained_model.pt"
+    model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
     return model
