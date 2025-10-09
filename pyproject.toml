@@ -15,4 +15,11 @@ dependencies = [
     "scikit-learn",
     "tqdm",
     "lightning",
+    "ipykernel",
+    "pip",
+    "seaborn",
+    "jupyter",
+    "hdf5storage",
+    "torch-lr-finder",
+    "pyarrow"
 ]
